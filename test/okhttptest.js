@@ -525,6 +525,208 @@ describe('okhttp tests', function() {
         );
     });
 
+    it('request max stale not honored with no-cache', function() {
+        for (const shared of [true, false]) {
+            const cache = new CachePolicy(
+                { headers: {} },
+                {
+                    headers: {
+                        'cache-control': 'max-age=120, no-cache',
+                    },
+                },
+                { shared }
+            );
+
+            assert(cache.stale());
+            assertMaxStaleNotHonored(cache, { headers: {} });
+        }
+    });
+
+    it('request max stale not honored with pragma no-cache', function() {
+        const cache = new CachePolicy(
+            { headers: {} },
+            {
+                headers: {
+                    pragma: 'no-cache',
+                    expires: formatDate(1, 3600),
+                },
+            },
+            { shared: false }
+        );
+
+        assert(cache.stale());
+        assertMaxStaleNotHonored(cache, { headers: {} });
+    });
+
+    it('request max stale not honored with no-store', function() {
+        const cache = new CachePolicy(
+            { headers: {} },
+            {
+                headers: {
+                    'cache-control': 'max-age=120, no-store',
+                },
+            },
+            { shared: false }
+        );
+
+        assert(!cache.storable());
+        assertMaxStaleNotHonored(cache, { headers: {} });
+    });
+
+    it('request max stale not honored with no-store request', function() {
+        const cache = new CachePolicy(
+            { headers: { 'cache-control': 'no-store' } },
+            {
+                headers: {
+                    'cache-control': 'max-age=120',
+                },
+            },
+            { shared: false }
+        );
+
+        assert(!cache.storable());
+        assertMaxStaleNotHonored(cache, { headers: {} });
+    });
+
+    it('request max stale not honored with uncacheable status or method', function() {
+        const partial = new CachePolicy(
+            { headers: {} },
+            {
+                status: 206,
+                headers: {
+                    'content-range': 'bytes 100-100/200',
+                    'cache-control': 'max-age=60',
+                },
+            },
+            { shared: false }
+        );
+        assert(!partial.storable());
+        assertMaxStaleNotHonored(partial, { headers: {} });
+
+        const post = new CachePolicy(
+            { method: 'POST', headers: {} },
+            {
+                headers: {
+                    'cache-control': 'public',
+                },
+            },
+            { shared: false }
+        );
+        assert(!post.storable());
+        assertMaxStaleNotHonored(post, { method: 'POST', headers: {} });
+    });
+
+    it('request max stale not honored with private in shared cache', function() {
+        const response = {
+            headers: {
+                'cache-control': 'max-age=120, private',
+                age: 240,
+            },
+        };
+
+        const sharedCache = new CachePolicy({ headers: {} }, response);
+        assert(!sharedCache.storable());
+        assertMaxStaleNotHonored(sharedCache, { headers: {} });
+
+        const privateCache = new CachePolicy({ headers: {} }, response, {
+            shared: false,
+        });
+        assert(privateCache.stale());
+        assertMaxStaleHonored(privateCache, { headers: {} });
+    });
+
+    it('request max stale not honored with authorization in shared cache', function() {
+        const cache = new CachePolicy(
+            { headers: { authorization: 'Bearer secret' } },
+            {
+                headers: {
+                    'cache-control': 'max-age=120',
+                },
+            }
+        );
+
+        assert(!cache.storable());
+        assertMaxStaleNotHonored(cache, {
+            headers: { authorization: 'Bearer secret' },
+        });
+        assertMaxStaleNotHonored(cache, { headers: {} });
+    });
+
+    it('request max stale not honored with proxy-revalidate in shared cache', function() {
+        const response = {
+            headers: {
+                'cache-control': 'max-age=120, proxy-revalidate',
+                age: 240,
+            },
+        };
+
+        const sharedCache = new CachePolicy({ headers: {} }, response);
+        assert(sharedCache.stale());
+        assertMaxStaleNotHonored(sharedCache, { headers: {} });
+
+        const privateCache = new CachePolicy({ headers: {} }, response, {
+            shared: false,
+        });
+        assert(privateCache.stale());
+        assertMaxStaleHonored(privateCache, { headers: {} });
+    });
+
+    it('request max stale not honored with set-cookie in shared cache', function() {
+        const response = {
+            headers: {
+                'set-cookie': 'session=secret',
+                'cache-control': 'max-age=120',
+                age: 240,
+            },
+        };
+
+        const sharedCache = new CachePolicy({ headers: {} }, response);
+        assert(sharedCache.stale());
+        assertMaxStaleNotHonored(sharedCache, { headers: {} });
+
+        const privateCache = new CachePolicy({ headers: {} }, response, {
+            shared: false,
+        });
+        assert(privateCache.stale());
+        assertMaxStaleHonored(privateCache, { headers: {} });
+
+        const publicCache = new CachePolicy(
+            { headers: {} },
+            {
+                headers: {
+                    'set-cookie': 'session=secret',
+                    'cache-control': 'max-age=120, public',
+                    age: 240,
+                },
+            }
+        );
+        assert(publicCache.stale());
+        assertMaxStaleHonored(publicCache, { headers: {} });
+    });
+
+    it('stale-while-revalidate not honored when response requires revalidation', function() {
+        const responses = [
+            { 'cache-control': 'max-age=60, no-cache, stale-while-revalidate=200' },
+            { 'cache-control': 'max-age=60, no-store, stale-while-revalidate=200' },
+            { 'cache-control': 'max-age=60, private, stale-while-revalidate=200' },
+            { 'cache-control': 'max-age=60, proxy-revalidate, stale-while-revalidate=200' },
+            {
+                'set-cookie': 'session=secret',
+                'cache-control': 'max-age=60, stale-while-revalidate=200',
+            },
+        ];
+
+        for (const headers of responses) {
+            const cache = new CachePolicy({ headers: {} }, { headers });
+
+            assert(cache.stale());
+            const result = cache.evaluateRequest({ headers: {} });
+            assert.equal(result.response, undefined, headers['cache-control']);
+            assert(result.revalidation, headers['cache-control']);
+            assert(result.revalidation.synchronous, headers['cache-control']);
+        }
+    });
+
     it('get headers deletes cached100 level warnings', function() {
         const cache = new CachePolicy(
             { headers: {} },
@@ -551,6 +753,35 @@ describe('okhttp tests', function() {
         );
         assert(!cache.storable());
     });
+
+    function assertMaxStaleNotHonored(cache, request) {
+        for (const maxStale of ['max-stale', 'max-stale=180']) {
+            const req = Object.assign({}, request, {
+                headers: Object.assign({}, request.headers, {
+                    'cache-control': maxStale,
+                }),
+            });
+
+            assert(!cache.satisfiesWithoutRevalidation(req), maxStale);
+
+            const result = cache.evaluateRequest(req);
+            assert.equal(result.response, undefined, maxStale);
+            assert(result.revalidation, maxStale);
+            assert(result.revalidation.synchronous, maxStale);
+        }
+    }
+
+    function assertMaxStaleHonored(cache, request) {
+        for (const maxStale of ['max-stale', 'max-stale=180']) {
+            const req = Object.assign({}, request, {
+                headers: Object.assign({}, request.headers, {
+                    'cache-control': maxStale,
+                }),
+            });
+
+            assert(cache.satisfiesWithoutRevalidation(req), maxStale);
+        }
+    }
 
     function formatDate(delta, unit) {
         return new Date(Date.now() + delta * unit * 1000).toUTCString();

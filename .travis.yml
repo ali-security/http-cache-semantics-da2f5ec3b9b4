@@ -1,7 +1,15 @@
 sudo: false
+dist: focal
 language: node_js
 node_js:
+    - '23'
     - '11'
     - '10'
     - '8'
     - '6'
+# package.json pins mocha ^11 (needs Node >= 18); legacy Node legs run the same
+# test/ suite with mocha 5.2.0 installed outside the project tree.
+install:
+    - if [ "${TRAVIS_NODE_VERSION}" = "23" ]; then npm install; else npm install --prefix "$HOME/legacy-mocha" mocha@5.2.0; fi
+script:
+    - if [ "${TRAVIS_NODE_VERSION}" = "23" ]; then npm test; else "$HOME/legacy-mocha/node_modules/.bin/mocha" test; fi

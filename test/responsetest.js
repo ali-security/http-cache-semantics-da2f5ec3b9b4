@@ -137,7 +137,7 @@ describe('Response headers', function() {
                     date: new Date(now - 3000).toGMTString(),
                     expires: new Date(now).toGMTString(),
                 },
-            },
+            }
         );
         assert.equal(3, cache.maxAge());
     });

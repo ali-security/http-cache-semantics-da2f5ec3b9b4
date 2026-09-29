@@ -484,18 +484,44 @@ module.exports = class CachePolicy {
             return true;
         }
 
-        // A Vary header field-value of "*" always fails to match
-        if (this._resHeaders.vary === '*') {
-            return false;
-        }
-
         const fields = this._resHeaders.vary
             .trim()
             .toLowerCase()
             .split(/\s*,\s*/);
-        for (const name of fields) {
-            if (req.headers[name] !== this._reqHeaders[name]) return false;
+
+        // A Vary header field-value of '*' always fails to match.
+        if (fields.includes('*')) {
+            return false;
         }
+
+        for (const name of fields) {
+            const reqHasOwn = Object.prototype.hasOwnProperty.call(
+                req.headers,
+                name
+            );
+            const cachedHasOwn = Object.prototype.hasOwnProperty.call(
+                this._reqHeaders,
+                name
+            );
+
+            // A Vary field must not match inherited properties.
+            if (!reqHasOwn && !cachedHasOwn) {
+                if (name in req.headers || name in this._reqHeaders) {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (!reqHasOwn || !cachedHasOwn) {
+                return false;
+            }
+
+            if (req.headers[name] !== this._reqHeaders[name]) {
+                return false;
+            }
+        }
+
         return true;
     }
 
